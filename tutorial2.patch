@@ -1,0 +1,96 @@
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index 524155d655da..77652ccd3977 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -396,7 +396,7 @@
+ 469	common	file_setattr		sys_file_setattr
+ 470	common	listns			sys_listns
+ 471	common	rseq_slice_yield	sys_rseq_slice_yield
+-
++472 common  k22hello sys_k22hello
+ #
+ # Due to a historical design error, certain syscalls are numbered differently
+ # in x32 as compared to native x86_64.  These syscalls have numbers 512-547.
+diff --git a/kernel/Makefile b/kernel/Makefile
+index 1e1a31673577..126128cebcca 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -10,7 +10,7 @@ obj-y     = fork.o exec_domain.o exec_state.o panic.o \
+ 	    extable.o params.o \
+ 	    kthread.o sys_ni.o nsproxy.o nstree.o nscommon.o \
+ 	    notifier.o ksysfs.o cred.o reboot.o \
+-	    async.o range.o smpboot.o ucount.o regset.o ksyms_common.o
++	    async.o range.o smpboot.o ucount.o regset.o ksyms_common.o k22hello.o
+ 
+ obj-$(CONFIG_MULTIUSER) += groups.o
+ obj-$(CONFIG_VHOST_TASK) += vhost_task.o
+diff --git a/kernel/k22hello.c b/kernel/k22hello.c
+new file mode 100644
+index 000000000000..ae0faa99c037
+--- /dev/null
++++ b/kernel/k22hello.c
+@@ -0,0 +1,64 @@
++#include <linux/printk.h>
++#include <linux/overflow.h>
++#include <linux/types.h>
++#include <linux/syscalls.h>
++
++static const char HELLO[] = "Hello ";
++
++static int k22hello(const char __user *input, size_t in_sz, char __user *output,
++		    size_t out_sz)
++{
++	int ret = 0;
++	size_t kbuf_sz = 0, written = 0;
++	char *kbuf = NULL;
++
++	printk("k22 says hello\n");
++
++	// check that we do not get arithmetic overflow
++	if (check_add_overflow(in_sz, sizeof(HELLO), &kbuf_sz)) {
++		ret = -EINVAL;
++		goto out;
++	}
++
++	// check that the output buffer is at LEAST enough for us to copy everything into
++	if (kbuf_sz < out_sz) {
++		ret = -ENOBUFS;
++		goto out;
++	}
++
++	// allocate a buffer inside the kernel
++	kbuf = kmalloc(kbuf_sz, GFP_KERNEL);
++	if (!kbuf) {
++		ret = -ENOMEM;
++		goto out;
++	}
++
++	// use strscpy instead of strcpy because strcpy instructs us to use this instead
++	// _pad also inserts 0 on the rest of the string
++	written = strscpy_pad(kbuf, HELLO, kbuf_sz);
++
++	// check docs of strscpy_pad to see what it returns
++	if (copy_from_user(kbuf + written, input, in_sz)) {
++		ret = -EFAULT;
++		goto out;
++	}
++
++	// technically not needed since we use strscpy_pad
++	// kbuf[kbuf_sz - 1] = '\0';
++
++	// copy at most kbuf_sz into the output buffer
++	if (copy_to_user(output, kbuf, kbuf_sz)) {
++		ret = -EFAULT;
++		goto out;
++	}
++
++out:
++	kfree(kbuf);
++	return ret;
++}
++
++SYSCALL_DEFINE4(k22hello, const char __user *, input, size_t, in_sz,
++		char __user *, output, size_t, out_sz)
++{
++	return k22hello(input, in_sz, output, out_sz);
++}
