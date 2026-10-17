@@ -53,7 +53,7 @@ index 000000000000..ae0faa99c037
 +	}
 +
 +	// check that the output buffer is at LEAST enough for us to copy everything into
-+	if (kbuf_sz < out_sz) {
++	if (out_sz < kbuf_sz) {
 +		ret = -ENOBUFS;
 +		goto out;
 +	}
